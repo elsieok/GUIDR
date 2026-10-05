@@ -5,7 +5,8 @@ import argparse
 import sys
 
 from .annotations import find_genes
-from .offtargets import find_offtargets
+from .index import SeedIndex
+# from .offtargets import find_offtargets
 from .ranking import ScoredGuide, rank_guides, score_guide
 from .seq import read_fasta
 from .sites import enumerate_sites
@@ -63,10 +64,11 @@ def main(argv: list[str] | None = None) -> int:
 
     all_sites = [s for chrom, seq in genome.items() for s in enumerate_sites(chrom, seq)]
     print(f"genome has {len(all_sites)} NGG sites (both strands)", file=sys.stderr)
+    index = SeedIndex(all_sites, args.max_mismatches)
 
     scored = []
     for n, guide in enumerate(candidates, start=1):
-        hits = find_offtargets(guide, all_sites, args.max_mismatches)
+        hits = index.query(guide)
         scored.append(score_guide(guide, hits, args.max_mismatches))
         if n % 25 == 0:
             print(f"  scanned {n}/{len(candidates)} guides", file=sys.stderr)
