@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "CRISPR guide design with genome-wide off-target search (M1: brute-force oracle)"
 requires-python = ">=3.10"
 dependencies = []
+api = ["fastapi", "uvicorn", "httpx"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
