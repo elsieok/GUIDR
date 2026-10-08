@@ -13,7 +13,7 @@ from .sites import enumerate_sites
 
 
 def format_table(ranked: list[ScoredGuide], max_mismatches: int, top: int) -> str:
-    header = ["rank", "location", "strand", "guide (5'->3')", "PAM"] + [
+    header = ["rank", "location", "strand", "score", "guide (5'->3')", "PAM"] + [
         f"{k}mm" for k in range(max_mismatches + 1)
     ]
     rows = [header]
@@ -21,7 +21,7 @@ def format_table(ranked: list[ScoredGuide], max_mismatches: int, top: int) -> st
         s = g.site
         # Display convention (1-based, inclusive) only at the output edge.
         loc = f"{s.chrom}:{s.start + 1}-{s.end}"
-        rows.append([str(rank), loc, s.strand, s.protospacer, s.pam] + [str(c) for c in g.profile])
+        rows.append([str(rank), loc, s.strand, f"{g.score:.1f}", s.protospacer, s.pam] + [str(c) for c in g.profile])
     widths = [max(len(r[i]) for r in rows) for i in range(len(header))]
     return "\n".join("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows)
 
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     print(format_table(rank_guides(scored), args.max_mismatches, args.top))
     print(
         "\nColumns = off-target sites with exactly k mismatches (NGG PAM, both strands).\n"
-        "Ranking is a placeholder: fewer close matches ranks higher.",
+        "A higher score is safer.",
         file=sys.stderr,
     )
     return 0

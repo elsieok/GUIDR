@@ -142,3 +142,120 @@ I would test the faster indexed version with the oracle and the same inputs, but
 There would be 256 (4^4) total possible combinations. That would mean on average each combination would appear about 2117 (542072/256) times. Then around 10587 (2117*5 tables) candidates would have to be verified. 542072/8469 is only 51 times less candidates
 
 
+## M3 Design Questions
+Part A: scoring rule (replaces the placeholder in ranking.py)
+
+1. Take two guides that each have exactly one off-target with 3 mismatches:
+Guide A: all 3 mismatches are in the PAM-side 12 letters.
+Guide B: all 3 mismatches are at the far end.
+The current ranking treats them as identical.
+Which guide is safer, and why? Answer in your own words, plus one sentence on how a scoring rule should treat the two.
+
+Guide A is safer since cas9 is less likely to accidentally cut when mismatched occur near the PAM. A scoring rule should show that both have danger of being cut, ut guide A has less chance than guide B.
+
+2. Should mismatch position matter? In real Cas9, mismatches near the PAM (the last roughly 10 to 12 letters of the protospacer) are generally tolerated less than distal ones. Using positions means off-target results need to carry which positions mismatched (count_mismatches currently returns only a count).
+
+Yes, it makes it more realistic. Perhaps a change would be that the count_mismatches returns a tuple (to avoid potential accidental changes to the data) of the indices where the mismatch occurs instead of the count
+
+** Don't change what count_mismatches returns:
+It runs about 2,800 times per guide in the hot loop and exits early on rejected sites. Building tuples there would slow the index you just sped up.
+The index and 44 tests depend on it returning a count or None.
+Positions are only needed for the few sites that survive verification, such as the 23 off-targets across all of lacZ. Add a separate function used only at scoring time
+
+3. How do all of a guide's off-targets combine into one score or ordering (for example a sum of per-off-target penalties mapped to 0 to 100), and how are ties broken?
+
+g = (∑_(i=1)^n (r_i)^p)^(1/p) higher p penalises high individual off targets, lower p penalises multiple off targets. can test different ones to find best compromise.
+Ties are broken with place on the actual genome
+
+4. Which ordering rules must always hold (for example a 0-mismatch off-target must outrank any number of 3-mismatch ones)? These become property tests.
+
+A perfect match scores the maximum.
+Adding a mismatch never raises an off-target's risk.
+Moving a mismatch toward the PAM never raises it.
+Adding an off-target never improves a guide's score.
+Scores stay within 0 to 100, and results are deterministic.
+
+5. State the limits plainly: simplified rule, not experimentally validated; NGG only; substitutions only; no on-target efficiency model. No ML.
+
+Since we have no real data from experiments of how cas9 deals with mismatches to create ML models, we'll just a simple, transparent heuristic that ranks sites. Once this project is finished, I will read some papers to potentially provide some experimental data that can be used to create a more accurate grading system as a next step. NGG only, substitutions only (no bulges or indels), no on-target efficiency, tested on one genome, and scores are relative rankings, not probabilities, so a risk of 40 does not mean a 40% chance of cutting.
+
+Part B: HTTP API
+* The server builds the index once at startup and keeps it in memory. This is where M2 pays off: about 4 ms per guide, versus about 3.4 s of fixed cost for each CLI run.
+* Endpoints to design: gene search; region data (genes and guides in [start, end) for the viewer, at a zoom level); guides for a gene (scored and ranked); off-targets for one guide.
+* Decide: JSON response shapes, pagination and limits, error handling, and the coordinate convention exposed at the API edge (internal is 0-based half-open; document what the API returns).
+* Caching: LRU for region and guide requests; record the cache hit rate.
+Framework is an open choice (for example FastAPI or Flask); test with the framework's test client.
+Measure: p50 and p99 latency per endpoint, throughput, cache hit rate (resume numbers).
+
+1. What does the viewer need from the server? List each endpoint with its URL, inputs, and what it returns. Think of four: look up a gene, get the features and guides in a genomic region, get a gene's ranked guides, and get one guide's off-targets.
+
+Look up a gene: @app.get("/genes/{name}")
+  input: name
+  output: name, chrom, start, end, and strand
+Get the features and guides in a genomic region: @app.get("/regions?chrom=&start=&end=")
+  input: chrom, start, end
+  output: genes overlapping the region, plus guides. Genomic sites occur about once every 8 letters, so a 100 kb region holds roughly 12,000 of them, which is far too many to draw or send. For wide regions the server should return counts per bin (for example, guides per 1,000 letters), and switch to individual guides only below some region size
+Get a gene's ranked guides: @app.get("/genes/{name}/guides?limit=&offset=")
+  input: name plus limit and offset
+  output: page of guides
+Get one guide's off-targets: @app.get("/guides/offtargets?chrom=&start=&strand=")
+  input: chrom, start, and strand
+  output: list, most dangerous first, with each off-target's location, strand, sequence, mismatch count, mismatch positions, and r
+
+2. What is loaded at startup, and what about the mismatch limit? The index is built for one max_mismatches value. If a request asks for a different one, do you reject it, build another index on demand, or fix one value at startup?
+
+The genome, genes, sites and index are loaded at startup. We allowing the user to choose a value and fix it at startup, and make the default 3 if they don't put anything. from there, requests can't change it 
+
+3. What coordinates does the API use? Internally we use 0-based, half-open. A viewer or a user might expect 1-based inclusive, as in GFF and the printed table. Pick one for the API and say how a request like "positions 100 to 200" is read.
+
+The API will use 1-based inclusive. It would be read as 99 - 200 under our backend's 0-based, half-open format
+
+4. What are the default and maximum page sizes, and does the response include total?
+
+Default is 20, maximum is 50. Yes the reposnse includes total so the client knows how many pages exist. If they give a bad value (eg. limit = 200) clamp to max value
+
+5. What do you cache, by what key, when is something evicted, and roughly how many entries does the cache hold before evicting?
+
+Cache the guides with key ("gene_guides", "lacZ")
+Cache guide's off targets with key (chrom, start, strand)
+Cache a region ((chrom, start, end) plus anything else that changes the output, such as the bin size)
+
+Evict on LRU policy
+
+Guide's should be filled lazily and be kept in their own LRU with a 200 gene cap. For the rest of the entries, it will hold 1000 entries, but we can reconfigure this later for better efficiency later if needed
+
+Record hits and misses, and expose them in /info or /stats.
+If requests can run concurrently, a shared cache needs a lock.
+
+6. What should the server return for an unknown gene, a bad region, or a region that's too large?
+
+Uknown gene: 404 (not found)
+Bad region: 400 (bad request)
+Oversized region: 400 (bad request)
+
+### Scoring rule (M3, placeholder heuristic)
+
+- Mismatch position i: 0-based index in the 20-letter protospacer, read 5'->3'.
+  i = 19 touches the PAM; i = 0 is the far end.
+- Per off-target risk: g = 100 * product over mismatched positions i of (20 - i) / 21.
+  (21, not 20, so no factor is 0: a PAM-side mismatch lowers g a lot but never
+  forces it to exactly 0.)
+- Guide combined risk: g = sqrt(sum of r^2) over the guide's off-targets (p = 2).
+- Guide score: 100 / (100 + g). Higher is safer. A guide with no off-targets scores the maximum.
+- Ranking: highest score first; ties broken by (chrom, start, strand) ascending.
+
+Properties (tested):
+- A perfect match has r = 100.
+- Adding a mismatch never raises r; moving a mismatch toward the PAM never raises r.
+- 0 < r <= 100.
+- max(r) <= g <= sum(r). Adding an off-target never lowers g, so it never raises the score.
+- A higher g always gives a lower score. Results are deterministic.
+- Dropped on purpose: "a 0-mismatch off-target beats any number of 3-mismatch ones"
+  (an additive combination can't guarantee it).
+
+Limits: a simplified heuristic, not experimentally validated; NGG PAM only;
+substitutions only (no bulges or indels); no on-target efficiency model; one genome tested;
+the linear position ramp is a placeholder. Scores are relative rankings, not probabilities.
+
+OrderedDict plus an RLock: get, put, and get_or_compute are all O(1).
+Holding the lock during compute() guarantees one computation per missing key under concurrent requests. The cost is that a slow compute (such as the 1.5 s gene scoring) blocks every other cache user for that time. Per-key locks would remove that, at the price of more complexity.

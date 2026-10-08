@@ -15,8 +15,8 @@ Design (see DECISIONS.md):
 """
 from __future__ import annotations
 
-from .offtargets import OffTarget, count_mismatches  # noqa: F401  (you will use both)
-from .sites import GUIDE_LEN, Site  # noqa: F401
+from .offtargets import OffTarget, count_mismatches
+from .sites import GUIDE_LEN, Site
 from collections import defaultdict
 
 def piece_bounds(length: int, pieces: int) -> list[tuple[int, int]]:
