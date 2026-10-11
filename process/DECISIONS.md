@@ -259,3 +259,6 @@ the linear position ramp is a placeholder. Scores are relative rankings, not pro
 
 OrderedDict plus an RLock: get, put, and get_or_compute are all O(1).
 Holding the lock during compute() guarantees one computation per missing key under concurrent requests. The cost is that a slow compute (such as the 1.5 s gene scoring) blocks every other cache user for that time. Per-key locks would remove that, at the price of more complexity.
+
+
+  

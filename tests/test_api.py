@@ -91,6 +91,10 @@ def test_default_max_mismatches_is_3(client):
     assert client.get("/info").json()["max_mismatches"] == 3
 
 
+def test_info_lists_chromosomes_with_lengths(client):
+    assert client.get("/info").json()["chromosomes"] == [{"name": "c", "length": CHROM_LEN}]
+
+
 # ---------------------------------------------------------------- /genes/{name}
 def test_gene_lookup_also_matches_locus_tag_and_id():
     genes = [Gene("geneA", "c", 0, 70, "+", {"locus_tag": "b0001", "ID": "gene-b0001"})]

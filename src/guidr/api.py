@@ -122,7 +122,7 @@ def create_app(
 
     @app.get("/info")
     def info():
-        return {"max_mismatches": max_mismatches, "coordinates": "1-based, inclusive", "cache": {"gene_guides": gene_cache.stats(), "other": other_cache.stats()}}
+        return {"max_mismatches": max_mismatches, "coordinates": "1-based, inclusive", "chromosomes": [{"name": c, "length": len(seq)} for c, seq in genome.items()], "cache": {"gene_guides": gene_cache.stats(), "other": other_cache.stats()}}
 
     def gene_json(g: Gene) -> dict:
         return {"name": g.name, "chrom": g.chrom, "start": g.start + 1, "end": g.end, "strand": g.strand}
