@@ -11,11 +11,13 @@ export class LRUCache<K, V> {
   private readonly cache = new Map<K, V>();
   private hits = 0;
   private misses = 0;
+  private readonly maxEntries: number;
 
-  constructor(private readonly maxEntries: number) {
+  constructor(maxEntries: number) {
     if (!Number.isInteger(maxEntries) || maxEntries < 1) {
       throw new RangeError("maxEntries must be an integer greater than 0")
     }
+    this.maxEntries = maxEntries;
   }
 
   /** The cached value (a hit: count it and mark the key most recent) or undefined (a miss: count it).

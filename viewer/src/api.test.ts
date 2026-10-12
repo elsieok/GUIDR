@@ -116,12 +116,32 @@ describe("allGeneGuides", () => {
     const f = fakeFetch((url) => {
       const offset = Number(new URL(url, "http://x").searchParams.get("offset"));
       const n = Math.max(0, Math.min(50, total - offset));
-      return { body: { gene: "g", total, limit: 50, offset, items: Array.from({ length: n }, (_, i) => ({ id: offset + i })) } };
+      return {
+      body: {
+        gene: "g",
+        total,
+        limit: 50,
+        offset,
+        items: Array.from({ length: n }, (_, i) => ({
+          chrom: "c",
+          start: offset + i,
+          end: offset + i + 19,
+          strand: "+" as const,
+          protospacer: "ACGT",
+          pam: "AGG",
+          profile: [],
+          risk: 0,
+          score: 100,
+        })),
+      },
+    };
     });
     const api = createApi({ fetchFn: f.fn });
     const all = await api.allGeneGuides("g");
     expect(all).toHaveLength(120);
-    expect(all.map((x: any) => x.id)).toEqual(Array.from({ length: 120 }, (_, i) => i));
+    expect(all.map((x) => x.start)).toEqual(
+    Array.from({ length: 120 }, (_, i) => i),
+  );
     expect(f.calls.map((c) => new URL(c.url, "http://x").searchParams.get("offset"))).toEqual(["0", "50", "100"]);
     await api.allGeneGuides("g");
     expect(f.calls).toHaveLength(3);

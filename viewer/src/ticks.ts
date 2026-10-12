@@ -1,4 +1,4 @@
-import { internalToApi, viewLength, type View } from "./viewport"; // eslint-disable-line @typescript-eslint/no-unused-vars
+import { internalToApi, viewLength, type View } from "./viewport";
 
 export interface Tick {
   /** 0-based position of the left edge of the base: ready to pass to posToX. */
