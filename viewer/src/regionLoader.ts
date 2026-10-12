@@ -1,6 +1,5 @@
 import type { RegionResponse } from "./types";
-import { requestWindow, type View } from "./viewport"; // eslint-disable-line @typescript-eslint/no-unused-vars
-
+import { requestWindow, type View } from "./viewport";
 export interface RegionLoaderOptions {
   api: { region(chrom: string, start: number, end: number, signal?: AbortSignal): Promise<RegionResponse> };
   chrom: string;

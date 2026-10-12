@@ -10,7 +10,7 @@ export class ApiError extends Error {
   status: number;
   body: ApiErrorBody | null   // null if not json
 
-  constructor(public status: number, public body: ApiErrorBody | null) {
+  constructor(status: number, body: ApiErrorBody | null) {
     super(body?.error ?? `HTTP ${status}`);
     this.name = "ApiError";
     this.status = status;
