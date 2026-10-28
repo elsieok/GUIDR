@@ -5,3 +5,7 @@ __pycache__/
 .pytest_cache/
 
 .GUIDR
+
+.DS_STORE
+
+process/

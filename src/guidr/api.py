@@ -133,15 +133,14 @@ def create_app(
     def scored_guide_json(sg) -> dict:
         return {**site_json(sg.site), "score": sg.score, "risk": sg.risk, "profile": list(sg.profile)}
 
+    gene_index: dict[str, list[Gene]] = {}
+    for g in genes:
+        values = [g.name] + [v for k in _ID_KEYS for v in g.attributes.get(k, "").split(",")]
+        for key in {v.strip().casefold() for v in values if v.strip()}:
+            gene_index.setdefault(key, []).append(g)
+    
     def find_gene(name: str) -> Gene:
-        def names_of(g: Gene) -> set[str]:
-            """Every name this gene answers to: its name plus its Name, gene, locus_tag, old_locus_tag, and ID values."""
-            values = [g.name]
-            for key in _ID_KEYS:
-                values.extend(g.attributes.get(key, "").split(","))   # old_locus_tag can hold several, comma-separated
-            return {v.strip().casefold() for v in values if v.strip()}
-
-        matches = [g for g in genes if name.casefold() in names_of(g)]
+        matches = gene_index.get(name.casefold(), [])
         if not matches:
             raise ApiError(404, "gene not found", name)
         if len(matches) > 1:

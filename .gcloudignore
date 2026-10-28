@@ -1,0 +1,11 @@
+.git
+.GUIDR
+.venv
+**/__pycache__
+.pytest_cache
+data
+tests
+scripts
+viewer/node_modules
+viewer/dist
+*.egg-info
