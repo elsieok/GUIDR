@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "guidr"
+version = "0.1.0"
+description = "CRISPR guide design with genome-wide off-target search"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "fastapi", "uvicorn"]
+api = ["fastapi", "uvicorn"]
+
+[project.scripts]
+guidr = "guidr.cli:main"
+
+[tool.maturin]
+manifest-path = "../guidr_cargo/Cargo.toml"   # wherever your Cargo.toml is, relative to this file
+python-source = "src"
+module-name = "guidr._core"
+profile = "release"                 # so `pip install -e` builds the fast version
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

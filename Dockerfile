@@ -5,7 +5,7 @@
 # ---- stage 1: build the viewer (Node is only needed here, not in the final image)
 FROM node:22-slim AS viewer
 WORKDIR /viewer
-COPY viewer/ ./
+COPY guidr_ts/viewer/ ./
 # Throw away any node_modules that came from the Mac, then install fresh for Linux and build.
 RUN rm -rf node_modules dist && npm ci && npm run build
 
@@ -21,8 +21,8 @@ RUN mkdir data \
     && curl -fsSL -o data/genome.fna.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.fna.gz" \
     && curl -fsSL -o data/genome.gff.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.gff.gz"
 
-COPY pyproject.toml ./
-COPY src ./src
+COPY guidr_py/pyproject.toml ./
+COPY guidr_py/src ./src
 RUN pip install --no-cache-dir ".[api]"
 
 COPY --from=viewer /viewer/dist ./static

@@ -11,6 +11,12 @@ from typing import Iterator
 
 from .seq import ACGT, revcomp
 
+try:
+    from ._core.index import SeedIndex as _RsSeedIndex
+    from ._core.sites import enumerate_sites as _rs_enumerate_sites
+except ImportError:
+    _rs_enumerate_sites = None
+
 GUIDE_LEN = 20
 PAM_LEN = 3
 SITE_LEN = GUIDE_LEN + PAM_LEN
@@ -32,10 +38,13 @@ class Site:
     def location(self) -> tuple[str, int, str]:
         return (self.chrom, self.start, self.strand)
 
+def _rust_enumerate_sites(chrom, seq, start=0, end=None):
+    if end is not None and end < 0:
+        return
+    for pos, strand, protospacer, pam in _rs_enumerate_sites(seq, max(start, 0), end):
+        yield Site(chrom, pos, strand, protospacer, pam)
 
-def enumerate_sites(
-    chrom: str, seq: str, start: int = 0, end: int | None = None
-) -> Iterator[Site]:
+def py_enumerate_sites(chrom: str, seq: str, start: int = 0, end: int | None = None) -> Iterator[Site]:
     """Yield every valid site whose whole 23-letter window lies inside [start, end).
 
     Windows containing anything other than A/C/G/T are skipped.
@@ -53,8 +62,12 @@ def enumerate_sites(
     last = min(end, len(seq)) - SITE_LEN  # last valid window start
     for i in range(first, last + 1):
         w = seq[i : i + SITE_LEN]
-        if w[21:] == "GG" and ACGT.issuperset(w):
+        if not ACGT.issuperset(w):
+            continue
+        if w[21:] == "GG":
             yield Site(chrom, i, "+", w[:GUIDE_LEN], w[GUIDE_LEN:])
-        if w[:2] == "CC" and ACGT.issuperset(w):
+        if w[:2] == "CC":
             rc = revcomp(w)
             yield Site(chrom, i, "-", rc[:GUIDE_LEN], rc[GUIDE_LEN:])
+
+enumerate_sites = _rust_enumerate_sites if _rs_enumerate_sites is not None else py_enumerate_sites

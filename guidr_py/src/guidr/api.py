@@ -159,7 +159,9 @@ def create_app(
         gene = find_gene(name)
         def compute():
             guides = list(enumerate_sites(gene.chrom, genome[gene.chrom], gene.start, gene.end))
-            scored_guides = list((map(lambda x: score_guide(x, index.query(x), max_mismatches), guides)))
+            # scored_guides = list((map(lambda x: score_guide(x, index.query(x), max_mismatches), guides)))
+            all_hits = index.query_many(guides)
+            scored_guides = [score_guide(x, hits, max_mismatches) for x, hits in zip(guides, all_hits)]
             ranked_guides = rank_guides(scored_guides)
             return ranked_guides
 
