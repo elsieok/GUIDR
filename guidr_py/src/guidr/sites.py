@@ -12,7 +12,6 @@ from typing import Iterator
 from .seq import ACGT, revcomp
 
 try:
-    from ._core.index import SeedIndex as _RsSeedIndex
     from ._core.sites import enumerate_sites as _rs_enumerate_sites
 except ImportError:
     _rs_enumerate_sites = None

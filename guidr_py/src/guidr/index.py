@@ -18,7 +18,7 @@ from __future__ import annotations
 from .offtargets import OffTarget, count_mismatches
 from .sites import GUIDE_LEN, Site
 try:
-    from _core.index import SeedIndex as _RsSeedIndex
+    from ._core.index import SeedIndex as _RsSeedIndex
 except ImportError:          # Rust extension not built: fall back to pure Python
     _RsSeedIndex = None
 from collections import defaultdict

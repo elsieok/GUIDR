@@ -11,8 +11,10 @@ Conventions (see DECISIONS.md):
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
+import time
 from bisect import bisect_left, bisect_right
 
 from fastapi import FastAPI
@@ -25,6 +27,8 @@ from .ranking import rank_guides, score_guide
 from .scoring import mismatch_positions, offtarget_risk
 from .seq import read_fasta
 from .sites import SITE_LEN, enumerate_sites
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PAGE_SIZE = 20
 MAX_PAGE_SIZE = 50
@@ -82,7 +86,7 @@ def create_app(
         -> {"gene", "total", "limit", "offset",
             "items": [{"chrom", "start", "end", "strand", "protospacer", "pam", "score", "risk", "profile"}]}
         Items are the gene's candidate guides (enumerate_sites over the gene's region),
-        each scored with score_guide(guide, index.query(guide), max_mismatches), ordered
+        each scored with score_guide(guide, index.query_many(guide), max_mismatches), ordered
         by rank_guides. limit < 1 or offset < 0 -> 400; limit > MAX_PAGE_SIZE is clamped
         (and the response reports the clamped limit). Cache the FULL ranked list in
         gene_cache under key ("gene_guides", gene.name): every page is a slice of the
@@ -108,8 +112,12 @@ def create_app(
 
     A failed request must not touch the caches.
     """
+    t0 = time.perf_counter()
     all_sites = [s for chrom, seq in genome.items() for s in enumerate_sites(chrom, seq)]
+    t1 = time.perf_counter()
     index = SeedIndex(all_sites, max_mismatches)
+    t2 = time.perf_counter()
+    logger.info("startup: found %d sites in %.2fs; built %s in %.2fs", len(all_sites), t1 - t0, type(index).__name__, t2 - t1)
     by_location = {site.location: site for site in all_sites}
     sites_by_chrom = {chrom: [] for chrom in genome}
     for site in all_sites:
@@ -265,6 +273,7 @@ def create_app(
 def app_from_env() -> FastAPI:
     """Real server: GUIDR_FASTA=... GUIDR_GFF=... [GUIDR_MAX_MISMATCHES=3] \\
         uvicorn --factory guidr.api:app_from_env"""
+    logging.basicConfig(level=os.environ.get("GUIDR_LOG_LEVEL", "INFO").upper(), format="%(levelname)s:     %(message)s")
     genome = read_fasta(os.environ["GUIDR_FASTA"])
     genes = list(read_genes(os.environ["GUIDR_GFF"]))
     return create_app(genome, genes, max_mismatches=int(os.environ.get("GUIDR_MAX_MISMATCHES", "3")))

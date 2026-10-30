@@ -9,3 +9,7 @@ scripts
 viewer/node_modules
 viewer/dist
 *.egg-info
+**/target
+**/*.so
+**/__pycache__
+**/node_modules

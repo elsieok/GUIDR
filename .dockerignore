@@ -1,0 +1,4 @@
+guidr_cargo/target
+guidr_py/**/target
+**/__pycache__
+**/node_modules

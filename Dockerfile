@@ -2,28 +2,37 @@
 # Build from the repository root:   docker build -t guidr .
 # Run it locally:                   docker run --rm -p 8080:8080 guidr    ->  http://localhost:8080
 
-# ---- stage 1: build the viewer (Node is only needed here, not in the final image)
+# ---- stage 1: build the viewer (unchanged)
 FROM node:22-slim AS viewer
 WORKDIR /viewer
 COPY guidr_ts/viewer/ ./
-# Throw away any node_modules that came from the Mac, then install fresh for Linux and build.
 RUN rm -rf node_modules dist && npm ci && npm run build
 
-# ---- stage 2: the Python server
+# ---- stage 2: build the Rust extension into a wheel (the toolchain stays in this stage)
+FROM python:3.12-slim AS wheel
+RUN apt-get update && apt-get install -y --no-install-recommends curl build-essential ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN pip install --no-cache-dir maturin
+WORKDIR /build
+COPY guidr_cargo/ ./guidr_cargo/
+COPY guidr_py/ ./guidr_py/
+WORKDIR /build/guidr_py
+RUN maturin build --release --out /wheels
+
+# ---- stage 3: the Python server (no Rust in the final image)
 FROM python:3.12-slim
 WORKDIR /app
-
-# The E. coli K-12 MG1655 genome and annotation (public NCBI RefSeq files), downloaded at build time.
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/*
 ARG NCBI=https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/005/845/GCF_000005845.2_ASM584v2
 RUN mkdir data \
-    && curl -fsSL -o data/genome.fna.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.fna.gz" \
-    && curl -fsSL -o data/genome.gff.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.gff.gz"
+ && curl -fsSL -o data/genome.fna.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.fna.gz" \
+ && curl -fsSL -o data/genome.gff.gz "$NCBI/GCF_000005845.2_ASM584v2_genomic.gff.gz"
 
-COPY guidr_py/pyproject.toml ./
-COPY guidr_py/src ./src
-RUN pip install --no-cache-dir ".[api]"
+COPY --from=wheel /wheels /wheels
+RUN pip install --no-cache-dir "$(ls /wheels/*.whl)[api]"
 
 COPY --from=viewer /viewer/dist ./static
 

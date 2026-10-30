@@ -8,6 +8,8 @@ Run:  GUIDR_FASTA=... GUIDR_GFF=... [GUIDR_STATIC_DIR=viewer/dist] [GUIDR_MAX_MI
 from __future__ import annotations
 
 import os
+import time
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -17,6 +19,7 @@ from .annotations import Gene, read_genes
 from .api import create_app
 from .seq import read_fasta
 
+logger = logging.getLogger(__name__)
 
 def create_server(
     genome: dict[str, str],
@@ -36,8 +39,11 @@ def create_server(
 
 
 def server_from_env() -> FastAPI:
+    logging.basicConfig(level=os.environ.get("GUIDR_LOG_LEVEL", "INFO").upper(), format="%(levelname)s:     %(message)s")
+    t0 = time.perf_counter()
     genome = read_fasta(os.environ["GUIDR_FASTA"])
     genes = list(read_genes(os.environ["GUIDR_GFF"]))
+    logger.info("startup: read %d chromosomes and %d genes in %.2fs", len(genome), len(genes), time.perf_counter() - t0)
     return create_server(
         genome,
         genes,

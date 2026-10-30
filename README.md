@@ -24,7 +24,7 @@ flowchart LR
   subgraph Container["One Docker image (Google Cloud Run)"]
     S["FastAPI server<br/>/api + static viewer"]
     C["LRU caches"]
-    I["Seed index<br/>542K candidate sites"]
+    I["Seed index (Rust)<br/>542K candidate sites"]
     SC["Position-weighted<br/>scoring"]
   end
   D[("NCBI RefSeq<br/>E. coli K-12 FASTA + GFF")]
@@ -35,7 +35,7 @@ flowchart LR
   D -- "loaded at startup" --> I
 ```
 
-The server builds its search index once at startup (about 4 seconds), keeps everything in memory, and serves the built viewer and the API from one origin, so there is no CORS setup.
+The server builds its search index once at startup (about 1 second on a laptop, about 3 seconds on Cloud Run), keeps everything in memory, and serves the built viewer and the API from one origin, so there is no CORS setup.
 
 ## How it works
 
@@ -46,6 +46,8 @@ A *site* is a 20-letter protospacer followed by `NGG`. Sliding a 23-letter windo
 The first version compares a guide against every site (410 ms per guide). It stays in the repository as the **oracle**: deliberately simple, so it can be trusted as ground truth.
 
 The fast version is a **seed-and-extend index** built on the pigeonhole principle. With up to *k* allowed mismatches, each 20-letter site is cut into *k + 1* pieces; *k* mismatches can spoil at most *k* pieces, so every true off-target matches at least one piece exactly. The index keeps one table per piece position (piece letters to the sites that have them). A query looks up one bucket per piece, merges the candidates, and verifies each one with a full comparison. On lacZ a guide needs about 2,800 verifications instead of 542,072.
+
+The index and the site finder are written in Rust (PyO3, built with maturin) and imported as `guidr._core`. Each 20-letter site is packed into a 64-bit integer at 2 bits per letter, so counting the mismatches between two sites is an XOR, a mask, and a popcount instead of a letter-by-letter loop, and each table is a sorted array searched by binary search. A batch query (`query_many`) releases Python's GIL and spreads a gene's guides across all cores. Python keeps the `Site` objects and the API; Rust only sees packed sequences and returns site positions. If the extension is not built, the code falls back to the original pure-Python index (`PySeedIndex`), which stays in the repository.
 
 ### 3. Scoring (a documented heuristic)
 Mismatches near the PAM make Cas9 less likely to cut, so position matters. For one off-target, `r = 100 × Π (20 − i) / 21` over its mismatched positions `i` (position 19 touches the PAM). A guide's combined risk is `g = sqrt(Σ r²)` and its score is `G = 10000 / (100 + g)`, from 0 to 100 (higher is safer). The rule is a simplified placeholder, **not experimentally validated**, and every score should be read as a relative ranking.
@@ -69,28 +71,34 @@ A React + TypeScript app drawing on an HTML canvas. The coordinate math (pixels 
 Measured on a MacBook Air (Apple silicon) with the *E. coli* K-12 MG1655 genome (4.64 M letters, 542,072 candidate sites); the benchmark client ran on the same machine as the server. Scripts: `scripts/benchmark_api.py`, `scripts/measure_startup.py`.
 
 ### Off-target search
-| | Brute-force reference | Seed index |
-|---|---:|---:|
-| Time per guide | 410 ms | **3.6 ms (115x)** |
-| Full lacZ gene (415 guides) | 172 s | **5.1 s** |
-| Sites verified per guide | 542,072 | about 2,820 |
+| | Brute-force reference | Seed index (Python) | Seed index (Rust) |
+|---|---:|---:|---:|
+| Time per guide | 410 ms | 3.6 ms (115x) | not measured separately |
+| Full lacZ gene (415 guides) | 172 s | 5.1 s (search only) | **about 20 ms** |
+| Sites verified per guide | 542,072 | about 2,820 | about 2,820 |
 
-The index returned results identical to the oracle for all 415 guides of lacZ (index build: 0.57 s).
+The Python index returned results identical to the oracle for all 415 guides of lacZ (index build: 0.57 s). The test suite runs the same comparisons against the Rust index.
+
+The Rust figure is a single first request to GET /genes/lacZ/guides on a fresh server, so it includes everything the endpoint does, not only the search. The whole API request includes: search, scoring, ranking, JSON.
+
+The Rust index is much faster than the Python one on the same work. With `scripts/rust_check.py` (a random 4.6 M-letter genome, up to 3 mismatches), 300 queries took 0.57 s in Python and under 5 ms in Rust (about 200x), finding sites was 3.8x faster (2.5 s to 0.7 s), and building the index 2x faster (0.41 s to 0.21 s). The API numbers below show the effect on the whole application.
 
 ### API
-| Request | p50 | p95 |
+| Request | Python index (p50 / p95) | Rust index (p50 / p95) |
 |---|---:|---:|
-| Gene lookup | 1.8 ms | 2.8 ms |
-| Gene guides, first request (scores every guide) | 468 ms | 1.5 s |
-| Gene guides, cached | 2.8 ms | 8.1 ms |
-| Region, 3 kb | 6.6 ms | 7.4 ms |
-| Off-targets, first request / cached | 5.0 ms / 1.2 ms | 6.5 ms / 1.3 ms |
+| Gene lookup | 1.8 ms / 2.8 ms | 1.5 ms / 2.9 ms |
+| Gene guides, first request (scores every guide) | 468 ms / 1.5 s | **4.5 ms / 20 ms** |
+| Gene guides, cached | 2.8 ms / 8.1 ms | 1.7 ms / 1.8 ms |
+| Region, 3 kb | 6.6 ms / 7.4 ms | 4.3 ms / 5.5 ms |
+| Off-targets, first request / cached (p50) | 5.0 ms / 1.2 ms | 1.0 ms / 0.9 ms |
+| Off-targets, first request / cached (p95) | 6.5 ms / 1.3 ms | 1.1 ms / 1.0 ms |
 
-Under load (8 parallel clients, 800 cached requests, 0 errors): **391 requests/s, p99 67 ms**. A 3 kb region costs about the same cached or not, because JSON encoding dominates; the cache matters for gene guides. The benchmark found that gene lookup was scanning all 4,600 genes on every request; indexing names once at startup cut it from 12.7 ms to 1.8 ms and raised load throughput from 176 to 391 requests/s.
+Under load (8 parallel clients, 800 cached requests, 0 errors): **391 requests/s and p99 67 ms with the Python index, about 630 requests/s (625 and 639 in two runs) and p99 23 to 32 ms with the Rust index**. A 3 kb region costs about the same cached or not, because JSON encoding dominates. With the Rust index a gene's guides are scored on the first request about as fast as from the cache, so the gene cache now matters much less. The benchmark found that gene lookup was scanning all 4,600 genes on every request; indexing names once at startup cut it from 12.7 ms to 1.8 ms and raised load throughput from 176 to 391 requests/s.
 
 ### Startup and deployment
-- Ready in 3.7 s (median of 3 runs) with 334 MB resident memory.
-- Deployed on Google Cloud Run with scale to zero. After 20+ minutes idle the first request takes **5.7 s** (median of 16 cold starts, typically 5.4 to 6.1 s; see `cold_start.log`). Warm requests take about 100 ms from my laptop, mostly network latency.
+- Ready in **1.1 s** (median of 3 runs) with about 480 MB resident memory. With the Python index it was 3.7 s and 334 MB.
+- Deployed on Google Cloud Run with scale to zero. After 20+ minutes idle the first request takes **5.7 s** (median of 16 cold starts, 4.8 to 7.4 s; see `cold_start.log`). Warm requests take about 100 ms from my laptop, mostly network latency.
+- On Cloud Run the app's own startup takes about 3 s (0.2 s reading the files, 2.2 s finding the 542K sites and creating their Python `Site` objects, 0.6 s building the index) on its slower CPU; the rest is container start. The Rust index made local startup about 3x faster, but I did not see a measurable change in the deployed cold start, and Cloud Run timings varied between sessions, so the local startup numbers are the controlled comparison. Creating the Python `Site` objects is now the main startup cost (see Future work).
 
 ## Validation
 
@@ -123,15 +131,15 @@ The search is also checked by tests: the index must return exactly the oracle's 
 - Substitutions only (no insertions or deletions/bulges); the `NGG` motif only (no weaker `NAG`); up to 3 mismatches by default.
 - The score is a simplified heuristic, not experimentally validated, and has no on-target efficiency model.
 - Tested on one genome (*E. coli* K-12). The viewer shows the first chromosome and treats the circular chromosome as linear.
-- A cold start takes about 6 seconds because the index is built at startup (saving it to disk is a possible improvement).
+- A cold start on Cloud Run takes about 6 seconds: about 3 s is the app loading the genome and creating the Python `Site` objects, and the rest is container start.
 - At full zoom-out the region response includes every gene in view (about 4,300), which makes it larger than necessary.
 
 ## Run it locally
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
+pip install -e "./guidr_py[dev]"      # builds the Rust extension, so it needs a Rust toolchain (https://rustup.rs)
+(cd guidr_py && pytest)
 
 # data: E. coli K-12 MG1655 from NCBI RefSeq (GCF_000005845.2)
 mkdir -p data && cd data
@@ -147,7 +155,7 @@ GUIDR_FASTA=data/GCF_000005845.2_ASM584v2_genomic.fna.gz GUIDR_GFF=data/GCF_0000
   uvicorn --factory guidr.api:app_from_env --port 8000
 
 # viewer (a second terminal; it proxies /api to the server on port 8000)
-cd viewer && npm install && npm run dev        # http://localhost:5173
+cd guidr_ts/viewer && npm install && npm run dev        # http://localhost:5173
 ```
 
 Or in one container: `docker build -t guidr . && docker run --rm -p 8080:8080 guidr`, then open <http://localhost:8080>.
@@ -163,6 +171,7 @@ gcloud run deploy guidr --source . --region us-central1 --memory 1Gi --cpu 1 --m
 * Insertions and deletions in the index
 * Weaker PAMs
 * Published position weights for the score (with citation)
+* Keeping the site table in Rust (packed arrays) and creating Python `Site` objects only for the sites a request returns, which would remove most of the startup time
 * Saving the index to disk to shorten cold starts
 * Capping genes returned at wide zoom
 * More genomes
